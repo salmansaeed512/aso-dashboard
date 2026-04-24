@@ -183,9 +183,10 @@ function aggregate(data, territory, source) {
     Object.keys(data[t]).forEach(function(date) {
       var vals=data[t][date], wk=sundayOf(date), mo=wednesdayOf(wk), yr=date.slice(0,4);
       if(!weeks[wk])  weeks[wk]  = {ftd:0,imp:0,total:0,rdl:0,days:0,_u:{}};
-      if(!months[mo]) months[mo] = {ftd:0,imp:0,total:0,rdl:0};
+      if(!months[mo]) months[mo] = {ftd:0,imp:0,total:0,rdl:0,_mu:{}};
       if(!years[yr])  years[yr]  = {ftd:0,imp:0,total:0,rdl:0};
       if(!weeks[wk]._u[date]){ weeks[wk]._u[date]=1; weeks[wk].days++; }
+      if(!months[mo]._mu[date]) months[mo]._mu[date]=1;
       srcs.forEach(function(src) {
         var ftd=vals['ftd_'+src]||0, imp=vals['imp_'+src]||0, total=vals['total_'+src]||0, rdl=vals['rdl_'+src]||0;
         weeks[wk].ftd+=ftd; weeks[wk].imp+=imp; weeks[wk].total+=total; weeks[wk].rdl+=rdl;
@@ -195,6 +196,12 @@ function aggregate(data, territory, source) {
     });
   });
   Object.keys(weeks).forEach(function(wk){ delete weeks[wk]._u; });
+  Object.keys(months).forEach(function(mo){
+    var p=mo.split('-'), yr=+p[0], mth=+p[1];
+    months[mo].days        = Object.keys(months[mo]._mu).length;
+    months[mo].daysInMonth = new Date(Date.UTC(yr,mth,0)).getUTCDate();
+    delete months[mo]._mu;
+  });
   return {weeks:weeks, months:months, years:years};
 }
 
@@ -204,15 +211,13 @@ var SRC_LABELS = {
   unavail:'Unavailable',     instit:'Institutional Purchase'
 };
 
-function weekBucket(data, territory, source, weekSunday) {
+function rangedBucket(data, territory, source, startDate, endDate) {
   var terrs = territory==='all' ? Object.keys(data) : (data[territory]?[territory]:[]);
   var srcs  = source==='all' ? ALL_SRCS : [source];
   var b = {ftd:0,imp:0,total:0,rdl:0};
-  var wkEnd = utcDate(weekSunday); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
-  var endDate = utcStr(wkEnd);
   terrs.forEach(function(t){
     Object.keys(data[t]).forEach(function(date){
-      if(date < weekSunday || date > endDate) return;
+      if(date < startDate || date > endDate) return;
       srcs.forEach(function(src){
         var v=data[t][date];
         b.ftd  +=v['ftd_'  +src]||0; b.imp  +=v['imp_'  +src]||0;
@@ -223,16 +228,26 @@ function weekBucket(data, territory, source, weekSunday) {
   return b;
 }
 
-function generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrDiff, mode) {
+function moDateRange(mo) {
+  var p=mo.split('-'), yr=+p[0], mth=+p[1];
+  return { start: mo+'-01', end: mo+'-'+String(new Date(Date.UTC(yr,mth,0)).getUTCDate()).padStart(2,'0') };
+}
+
+function wkDateRange(wkSunday) {
+  var e=utcDate(wkSunday); e.setUTCDate(e.getUTCDate()+6);
+  return { start: wkSunday, end: utcStr(e) };
+}
+
+function generateBreakdownReason(data, territory, source, latestStart, latestEnd, prevStart, prevEnd, cvrDiff, mode, periodLabel) {
   var items = mode==='country' ? Object.keys(data) : ALL_SRCS;
   var results=[], totalImpLatest=0;
   items.forEach(function(item){
     var t = mode==='country' ? item : territory;
     var s = mode==='source'  ? item : source;
-    var bL = weekBucket(data, t, s, latestWk);
+    var bL = rangedBucket(data, t, s, latestStart, latestEnd);
     if(!bL.imp) return;
     totalImpLatest += bL.imp;
-    var bP = prevWk ? weekBucket(data, t, s, prevWk) : null;
+    var bP = prevStart ? rangedBucket(data, t, s, prevStart, prevEnd) : null;
     results.push({ name: mode==='country' ? item : (SRC_LABELS[item]||item), bL:bL, bP:bP });
   });
   if(!results.length) return 'No breakdown data available.';
@@ -249,14 +264,15 @@ function generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrD
   sortable.sort(function(a,b){ return Math.abs(b.contrib)-Math.abs(a.contrib); });
   if(!sortable.length) return 'No major driver detected across '+(mode==='country'?'countries':'sources')+'.';
 
-  var top  = sortable[0];
-  var opp  = sortable.filter(function(r){ return r.contrib!==null && Math.sign(r.contrib)!==Math.sign(top.contrib) && r.impShare>=2; })[0];
-  var dir  = cvrDiff>=0 ? 'increased' : 'declined';
+  var top = sortable[0];
+  var opp = sortable.filter(function(r){ return r.contrib!==null && Math.sign(r.contrib)!==Math.sign(top.contrib) && r.impShare>=2; })[0];
+  var dir = cvrDiff>=0 ? 'increased' : 'declined';
+  var pl  = periodLabel || 'period';
 
   var txt = 'CVR '+dir+'. Main driver: '+top.name+
-    ' ('+top.impShare.toFixed(0)+'% imp share, CVR '+(top.cvrDiff>=0?'+':'')+top.cvrDiff.toFixed(2)+'pp WoW)';
+    ' ('+top.impShare.toFixed(0)+'% imp share, CVR '+(top.cvrDiff>=0?'+':'')+top.cvrDiff.toFixed(2)+'pp '+pl+')';
   if(opp)
-    txt += '. '+opp.name+' pulled in the opposite direction ('+opp.impShare.toFixed(0)+'% imp share, CVR '+(opp.cvrDiff>=0?'+':'')+opp.cvrDiff.toFixed(2)+'pp WoW)';
+    txt += '. '+opp.name+' pulled in the opposite direction ('+opp.impShare.toFixed(0)+'% imp share, CVR '+(opp.cvrDiff>=0?'+':'')+opp.cvrDiff.toFixed(2)+'pp '+pl+')';
   txt += '.';
   return txt;
 }
@@ -313,97 +329,142 @@ function getDailyTotals(data, territory, source, startDate, endDate) {
   return daily;
 }
 
-function generateCVRReason(data, territory, source, agg, latestWk, prevWk, latestCVR, prevCVR) {
-  if (latestCVR === null) return 'Impressions data is zero or missing for the latest week — CVR cannot be calculated.';
-  if (prevCVR   === null) return 'Not enough previous week data to calculate WoW CVR.';
+function generateCVRReason(data, territory, source, latestStart, latestEnd, prevStart, prevEnd, latestB, prevB, latestCVR, prevCVR, periodLabel) {
+  if (latestCVR === null) return 'Impressions data is zero or missing — CVR cannot be calculated.';
+  if (prevCVR   === null) return 'Not enough previous '+periodLabel+' data to calculate CVR.';
 
   var cvrDiff = latestCVR - prevCVR;
-  var dir = cvrDiff >= 0 ? 'increased' : 'declined';
+  var dir     = cvrDiff >= 0 ? 'increased' : 'declined';
 
-  // Breakdown by country when all countries selected (primary dimension)
-  if (territory === 'all') return generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrDiff, 'country');
-  // Breakdown by source when all sources selected for a specific country
-  if (source === 'all')    return generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrDiff, 'source');
+  if (territory === 'all') return generateBreakdownReason(data, territory, source, latestStart, latestEnd, prevStart, prevEnd, cvrDiff, 'country', periodLabel);
+  if (source    === 'all') return generateBreakdownReason(data, territory, source, latestStart, latestEnd, prevStart, prevEnd, cvrDiff, 'source',  periodLabel);
 
-  var latestB = agg.weeks[latestWk];
-  var prevB   = agg.weeks[prevWk];
-  var impWoW   = pct(latestB.imp,   prevB.imp);
-  var totalWoW = pct(latestB.total, prevB.total);
+  var impChg   = pct(latestB.imp,   prevB.imp);
+  var totalChg = pct(latestB.total, prevB.total);
   var THRESH   = 10;
 
-  // WoW metric-level explanation (primary signal)
-  if (impWoW !== null && totalWoW !== null) {
+  if (impChg !== null && totalChg !== null) {
     if (cvrDiff > 0) {
-      if (totalWoW > THRESH && totalWoW > impWoW + THRESH)
-        return 'CVR ' + dir + ' because Total Downloads grew significantly (+' + totalWoW.toFixed(1) + '% WoW) while Impressions changed by only ' + (impWoW >= 0 ? '+' : '') + impWoW.toFixed(1) + '%.';
-      if (impWoW < -THRESH && Math.abs(totalWoW) < THRESH)
-        return 'CVR ' + dir + ' because Impressions dropped ' + impWoW.toFixed(1) + '% WoW while Downloads held relatively steady (' + (totalWoW >= 0 ? '+' : '') + totalWoW.toFixed(1) + '%), improving the conversion ratio.';
+      if (totalChg > THRESH && totalChg > impChg + THRESH)
+        return 'CVR '+dir+' because Total Downloads grew significantly (+'+ totalChg.toFixed(1)+'% '+periodLabel+') while Impressions changed by only '+(impChg>=0?'+':'')+impChg.toFixed(1)+'%.';
+      if (impChg < -THRESH && Math.abs(totalChg) < THRESH)
+        return 'CVR '+dir+' because Impressions dropped '+impChg.toFixed(1)+'% '+periodLabel+' while Downloads held relatively steady ('+(totalChg>=0?'+':'')+totalChg.toFixed(1)+'%), improving the conversion ratio.';
     } else {
-      if (impWoW > THRESH && impWoW > totalWoW + THRESH)
-        return 'CVR ' + dir + ' because Impressions rose sharply (+' + impWoW.toFixed(1) + '% WoW) but Downloads did not grow at the same pace (' + (totalWoW >= 0 ? '+' : '') + totalWoW.toFixed(1) + '%), diluting the conversion rate.';
-      if (totalWoW < -THRESH && Math.abs(impWoW) < THRESH)
-        return 'CVR ' + dir + ' because Total Downloads dropped ' + totalWoW.toFixed(1) + '% WoW while Impressions remained relatively stable (' + (impWoW >= 0 ? '+' : '') + impWoW.toFixed(1) + '%).';
+      if (impChg > THRESH && impChg > totalChg + THRESH)
+        return 'CVR '+dir+' because Impressions rose sharply (+'+impChg.toFixed(1)+'% '+periodLabel+') but Downloads did not grow at the same pace ('+(totalChg>=0?'+':'')+totalChg.toFixed(1)+'%), diluting the conversion rate.';
+      if (totalChg < -THRESH && Math.abs(impChg) < THRESH)
+        return 'CVR '+dir+' because Total Downloads dropped '+totalChg.toFixed(1)+'% '+periodLabel+' while Impressions remained relatively stable ('+(impChg>=0?'+':'')+impChg.toFixed(1)+'%).';
     }
   }
 
-  // Intra-week daily spike (fallback)
-  var wkEnd = utcDate(latestWk);
-  wkEnd.setUTCDate(wkEnd.getUTCDate() + 6);
-  var daily = getDailyTotals(data, territory, source, latestWk, utcStr(wkEnd));
-  var days  = Object.keys(daily).sort();
-  var avgImp = 0, avgTotal = 0;
-  days.forEach(function(d){ avgImp += daily[d].imp; avgTotal += daily[d].total; });
-  if (days.length) { avgImp /= days.length; avgTotal /= days.length; }
+  // Daily spike fallback — only meaningful for weekly periods
+  if (periodLabel === 'WoW') {
+    var daily = getDailyTotals(data, territory, source, latestStart, latestEnd);
+    var days  = Object.keys(daily).sort();
+    var avgImp=0, avgTotal=0;
+    days.forEach(function(d){ avgImp+=daily[d].imp; avgTotal+=daily[d].total; });
+    if(days.length){ avgImp/=days.length; avgTotal/=days.length; }
+    var peakImpDay=null,peakImpDev=0,peakTotalDay=null,peakTotalDev=0;
+    days.forEach(function(d){
+      if(avgImp>0){var di=(daily[d].imp-avgImp)/avgImp*100; if(Math.abs(di)>Math.abs(peakImpDev)){peakImpDev=di;peakImpDay=d;}}
+      if(avgTotal>0){var dt=(daily[d].total-avgTotal)/avgTotal*100; if(Math.abs(dt)>Math.abs(peakTotalDev)){peakTotalDev=dt;peakTotalDay=d;}}
+    });
+    if(Math.abs(peakTotalDev)>=20&&Math.abs(peakTotalDev)>Math.abs(peakImpDev))
+      return 'CVR '+dir+' mainly because Total Downloads '+(peakTotalDev>0?'peaked':'dropped')+' on '+peakTotalDay+' ('+Math.abs(Math.round(peakTotalDev))+'% '+(peakTotalDev>0?'above':'below')+' the weekly average), while Impressions stayed relatively stable.';
+    if(Math.abs(peakImpDev)>=20)
+      return 'CVR '+dir+' because Impressions '+(peakImpDev>0?'spiked':'dropped')+' on '+peakImpDay+' ('+Math.abs(Math.round(peakImpDev))+'% '+(peakImpDev>0?'above':'below')+' the weekly average) but Downloads did not move proportionally.';
+  }
 
-  var peakImpDay=null, peakImpDev=0, peakTotalDay=null, peakTotalDev=0;
-  days.forEach(function(d) {
-    if (avgImp   > 0) { var di = (daily[d].imp   - avgImp)   / avgImp   * 100; if (Math.abs(di) > Math.abs(peakImpDev))   { peakImpDev   = di; peakImpDay   = d; } }
-    if (avgTotal > 0) { var dt = (daily[d].total - avgTotal) / avgTotal * 100; if (Math.abs(dt) > Math.abs(peakTotalDev)) { peakTotalDev = dt; peakTotalDay = d; } }
-  });
-
-  if (Math.abs(peakTotalDev) >= 20 && Math.abs(peakTotalDev) > Math.abs(peakImpDev))
-    return 'CVR ' + dir + ' mainly because Total Downloads ' + (peakTotalDev > 0 ? 'peaked' : 'dropped') + ' on ' + peakTotalDay + ' (' + Math.abs(Math.round(peakTotalDev)) + '% ' + (peakTotalDev > 0 ? 'above' : 'below') + ' the weekly average), while Impressions stayed relatively stable.';
-  if (Math.abs(peakImpDev) >= 20)
-    return 'CVR ' + dir + ' because Impressions ' + (peakImpDev > 0 ? 'spiked' : 'dropped') + ' on ' + peakImpDay + ' (' + Math.abs(Math.round(peakImpDev)) + '% ' + (peakImpDev > 0 ? 'above' : 'below') + ' the weekly average) but Downloads did not move proportionally.';
-
-  return 'No major spike or drop detected. The CVR change appears to be driven by normal daily variation.';
+  return 'No major spike or drop detected. The CVR change appears to be driven by normal variation.';
 }
 
 function renderInsightCards(data, territory, source, agg) {
   var el = document.getElementById('insight-cards');
-  var sortedWeeks    = Object.keys(agg.weeks).sort();
-  var completeWeeks  = sortedWeeks.filter(function(wk){ return agg.weeks[wk].days === 7; });
-  if (!completeWeeks.length) { el.innerHTML = ''; return; }
+  var latestB, prevB, latestCVR, prevCVR;
+  var latestStart, latestEnd, prevStart, prevEnd;
+  var cardLabel, changeLabel, periodLabel, cvrSub;
 
-  var latestWk  = completeWeeks[completeWeeks.length - 1];
-  var prevWk    = completeWeeks.length >= 2 ? completeWeeks[completeWeeks.length - 2] : null;
-  var latestCVR = calcCVR(agg.weeks[latestWk]);
-  var prevCVR   = prevWk ? calcCVR(agg.weeks[prevWk]) : null;
+  if (granularity === 'monthly') {
+    var sortedMos    = Object.keys(agg.months).sort();
+    var completeMos  = sortedMos.filter(function(mo){ return agg.months[mo].days >= agg.months[mo].daysInMonth; });
+    if (!completeMos.length) { el.innerHTML = ''; return; }
+    var latestMo = completeMos[completeMos.length - 1];
+    var prevMo   = completeMos.length >= 2 ? completeMos[completeMos.length - 2] : null;
+    latestB      = agg.months[latestMo];
+    prevB        = prevMo ? agg.months[prevMo] : null;
+    latestCVR    = calcCVR(latestB);
+    prevCVR      = prevB ? calcCVR(prevB) : null;
+    var lr       = moDateRange(latestMo); latestStart=lr.start; latestEnd=lr.end;
+    if (prevMo) { var pr=moDateRange(prevMo); prevStart=pr.start; prevEnd=pr.end; }
+    cardLabel    = 'Latest Month CVR';
+    changeLabel  = 'MoM CVR Change';
+    periodLabel  = 'MoM';
+    cvrSub       = fmtMonth(latestMo);
+
+  } else if (granularity === 'yearly') {
+    var allWks  = Object.keys(agg.weeks).sort();
+    var maxYear = 0;
+    allWks.forEach(function(wk){ var y=parseInt(wednesdayOf(wk).slice(0,4)); if(y>maxYear) maxYear=y; });
+    var ywMap = {};
+    allWks.forEach(function(wk){ var y=parseInt(wednesdayOf(wk).slice(0,4)),wn=weekNum(wk); if(!ywMap[y])ywMap[y]={}; ywMap[y][wn]=wk; });
+    var curWks = allWks.filter(function(wk){ return parseInt(wednesdayOf(wk).slice(0,4))===maxYear && agg.weeks[wk].days===7; });
+    if (!curWks.length) { el.innerHTML = ''; return; }
+    var latestWk = curWks[curWks.length - 1];
+    var wn       = weekNum(latestWk);
+    var prevWk   = (ywMap[maxYear-1] && ywMap[maxYear-1][wn]) ? ywMap[maxYear-1][wn] : null;
+    latestB      = agg.weeks[latestWk];
+    prevB        = prevWk ? agg.weeks[prevWk] : null;
+    latestCVR    = calcCVR(latestB);
+    prevCVR      = prevB ? calcCVR(prevB) : null;
+    var lwr      = wkDateRange(latestWk); latestStart=lwr.start; latestEnd=lwr.end;
+    if (prevWk) { var pwr=wkDateRange(prevWk); prevStart=pwr.start; prevEnd=pwr.end; }
+    cardLabel    = 'Latest Week CVR';
+    changeLabel  = 'YoY CVR Change';
+    periodLabel  = 'YoY';
+    cvrSub       = fmtRange(latestWk) + ' ' + maxYear;
+
+  } else {
+    var sortedWks   = Object.keys(agg.weeks).sort();
+    var completeWks = sortedWks.filter(function(wk){ return agg.weeks[wk].days === 7; });
+    if (!completeWks.length) { el.innerHTML = ''; return; }
+    var latestWk = completeWks[completeWks.length - 1];
+    var prevWk   = completeWks.length >= 2 ? completeWks[completeWks.length - 2] : null;
+    latestB      = agg.weeks[latestWk];
+    prevB        = prevWk ? agg.weeks[prevWk] : null;
+    latestCVR    = calcCVR(latestB);
+    prevCVR      = prevB ? calcCVR(prevB) : null;
+    var lwr      = wkDateRange(latestWk); latestStart=lwr.start; latestEnd=lwr.end;
+    if (prevWk) { var pwr=wkDateRange(prevWk); prevStart=pwr.start; prevEnd=pwr.end; }
+    cardLabel    = 'Latest Week CVR';
+    changeLabel  = 'WoW CVR Change';
+    periodLabel  = 'WoW';
+    cvrSub       = fmtRange(latestWk);
+  }
 
   var cvrDisplay = latestCVR !== null ? latestCVR.toFixed(2) + '%' : '—';
-  var cvrSub     = fmtRange(latestWk);
 
-  var wowHtml, wowBg;
+  var changeHtml, changeBg;
   if (latestCVR === null || prevCVR === null) {
-    wowBg   = 'bg-neu';
-    wowHtml = '<div class="ic-value neu">—</div><div class="ic-sub">Not enough data</div>';
+    changeBg   = 'bg-neu';
+    changeHtml = '<div class="ic-value neu">—</div><div class="ic-sub">Not enough data</div>';
   } else {
     var pp     = latestCVR - prevCVR;
     var rel    = prevCVR > 0 ? pp / prevCVR * 100 : null;
     var valCls = pp > 0.05 ? 'pos' : pp < -0.05 ? 'neg' : 'neu';
-    wowBg      = pp > 0.05 ? 'bg-pos' : pp < -0.05 ? 'bg-neg' : 'bg-neu';
+    changeBg   = pp > 0.05 ? 'bg-pos' : pp < -0.05 ? 'bg-neg' : 'bg-neu';
     var ppStr  = (pp >= 0 ? '+' : '') + pp.toFixed(2) + 'pp';
     var relStr = rel !== null ? ' / ' + (rel >= 0 ? '+' : '') + rel.toFixed(1) + '%' : '';
-    wowHtml = '<div class="ic-value ' + valCls + '">' + ppStr + relStr + '</div>' +
-              '<div class="ic-sub">Prev week: ' + prevCVR.toFixed(2) + '%</div>';
+    var prevLbl = granularity==='monthly' ? 'month' : granularity==='yearly' ? 'year (same week)' : 'week';
+    changeHtml = '<div class="ic-value ' + valCls + '">' + ppStr + relStr + '</div>' +
+                 '<div class="ic-sub">Prev ' + prevLbl + ': ' + prevCVR.toFixed(2) + '%</div>';
   }
 
-  var reason = generateCVRReason(data, territory, source, agg, latestWk, prevWk, latestCVR, prevCVR);
+  var reason = generateCVRReason(data, territory, source, latestStart, latestEnd, prevStart, prevEnd, latestB, prevB, latestCVR, prevCVR, periodLabel);
   el.innerHTML =
-    '<div class="ic"><div class="ic-label">Latest Week CVR</div>' +
+    '<div class="ic"><div class="ic-label">' + cardLabel + '</div>' +
       '<div class="ic-value">' + cvrDisplay + '</div>' +
       '<div class="ic-sub">' + cvrSub + '</div></div>' +
-    '<div class="ic ' + wowBg + '"><div class="ic-label">WoW CVR Change</div>' + wowHtml + '</div>' +
+    '<div class="ic ' + changeBg + '"><div class="ic-label">' + changeLabel + '</div>' + changeHtml + '</div>' +
     '<div class="ic bg-neu"><div class="ic-label">Insight</div><div class="ic-reason">' + esc(reason) + '</div></div>';
 }
 
