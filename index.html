@@ -38,6 +38,15 @@ td.grp-start{border-left:2px solid #e8edf2}
 .empty h3{font-size:15px;margin-bottom:6px}
 .toast{position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);z-index:999;opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.show{opacity:1}
+.insight-cards{display:grid;grid-template-columns:170px 230px 1fr;gap:12px;margin:0 24px 16px}
+.ic{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.ic-label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.ic-value{font-size:22px;font-weight:700;color:#1a1a2e;line-height:1.2}
+.ic-value.pos{color:#16a34a}
+.ic-value.neg{color:#dc2626}
+.ic-sub{font-size:12px;color:#64748b;margin-top:5px;line-height:1.5}
+.ic-reason{font-size:13px;color:#374151;line-height:1.6}
+@media(max-width:900px){.insight-cards{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -86,6 +95,8 @@ td.grp-start{border-left:2px solid #e8edf2}
     </div>
   </div>
 </div>
+
+<div id="insight-cards"></div>
 
 <div class="table-wrap" id="table-wrap">
   <div class="empty"><h3>Loading…</h3></div>
@@ -207,11 +218,123 @@ function tableMeta(source, territory, count, word) {
     '<span>'+count+' '+word+'</span></div>';
 }
 
+// ── CVR insight cards ─────────────────────────────────────────
+function calcCVR(bucket) {
+  if (!bucket || !bucket.imp || bucket.imp === 0) return null;
+  return bucket.total / bucket.imp * 100;
+}
+
+function getDailyTotals(data, territory, source, startDate, endDate) {
+  var terrs = territory === 'all' ? Object.keys(data) : (data[territory] ? [territory] : []);
+  var srcs  = source   === 'all' ? ALL_SRCS : [source];
+  var daily = {};
+  terrs.forEach(function(t) {
+    Object.keys(data[t]).forEach(function(date) {
+      if (date < startDate || date > endDate) return;
+      if (!daily[date]) daily[date] = {ftd:0,imp:0,total:0,rdl:0};
+      srcs.forEach(function(src) {
+        var v = data[t][date];
+        daily[date].ftd   += v['ftd_'  +src] || 0;
+        daily[date].imp   += v['imp_'  +src] || 0;
+        daily[date].total += v['total_'+src] || 0;
+        daily[date].rdl   += v['rdl_'  +src] || 0;
+      });
+    });
+  });
+  return daily;
+}
+
+function generateCVRReason(data, territory, source, agg, latestWk, prevWk, latestCVR, prevCVR) {
+  if (latestCVR === null) return 'Impressions data is zero or missing for the latest week — CVR cannot be calculated.';
+  if (prevCVR   === null) return 'Not enough previous week data to calculate WoW CVR.';
+
+  var cvrDiff = latestCVR - prevCVR;
+  var latestB = agg.weeks[latestWk];
+  var prevB   = agg.weeks[prevWk];
+  var impWoW   = pct(latestB.imp,   prevB.imp);
+  var totalWoW = pct(latestB.total, prevB.total);
+  var THRESH   = 10;
+  var dir = cvrDiff >= 0 ? 'increased' : 'declined';
+
+  // WoW metric-level explanation (primary signal)
+  if (impWoW !== null && totalWoW !== null) {
+    if (cvrDiff > 0) {
+      if (totalWoW > THRESH && totalWoW > impWoW + THRESH)
+        return 'CVR ' + dir + ' because Total Downloads grew significantly (+' + totalWoW.toFixed(1) + '% WoW) while Impressions changed by only ' + (impWoW >= 0 ? '+' : '') + impWoW.toFixed(1) + '%.';
+      if (impWoW < -THRESH && Math.abs(totalWoW) < THRESH)
+        return 'CVR ' + dir + ' because Impressions dropped ' + impWoW.toFixed(1) + '% WoW while Downloads held relatively steady (' + (totalWoW >= 0 ? '+' : '') + totalWoW.toFixed(1) + '%), improving the conversion ratio.';
+    } else {
+      if (impWoW > THRESH && impWoW > totalWoW + THRESH)
+        return 'CVR ' + dir + ' because Impressions rose sharply (+' + impWoW.toFixed(1) + '% WoW) but Downloads did not grow at the same pace (' + (totalWoW >= 0 ? '+' : '') + totalWoW.toFixed(1) + '%), diluting the conversion rate.';
+      if (totalWoW < -THRESH && Math.abs(impWoW) < THRESH)
+        return 'CVR ' + dir + ' because Total Downloads dropped ' + totalWoW.toFixed(1) + '% WoW while Impressions remained relatively stable (' + (impWoW >= 0 ? '+' : '') + impWoW.toFixed(1) + '%).';
+    }
+  }
+
+  // Intra-week daily spike (fallback)
+  var wkEnd = utcDate(latestWk);
+  wkEnd.setUTCDate(wkEnd.getUTCDate() + 6);
+  var daily = getDailyTotals(data, territory, source, latestWk, utcStr(wkEnd));
+  var days  = Object.keys(daily).sort();
+  var avgImp = 0, avgTotal = 0;
+  days.forEach(function(d){ avgImp += daily[d].imp; avgTotal += daily[d].total; });
+  if (days.length) { avgImp /= days.length; avgTotal /= days.length; }
+
+  var peakImpDay=null, peakImpDev=0, peakTotalDay=null, peakTotalDev=0;
+  days.forEach(function(d) {
+    if (avgImp   > 0) { var di = (daily[d].imp   - avgImp)   / avgImp   * 100; if (Math.abs(di) > Math.abs(peakImpDev))   { peakImpDev   = di; peakImpDay   = d; } }
+    if (avgTotal > 0) { var dt = (daily[d].total - avgTotal) / avgTotal * 100; if (Math.abs(dt) > Math.abs(peakTotalDev)) { peakTotalDev = dt; peakTotalDay = d; } }
+  });
+
+  if (Math.abs(peakTotalDev) >= 20 && Math.abs(peakTotalDev) > Math.abs(peakImpDev))
+    return 'CVR ' + dir + ' mainly because Total Downloads ' + (peakTotalDev > 0 ? 'peaked' : 'dropped') + ' on ' + peakTotalDay + ' (' + Math.abs(Math.round(peakTotalDev)) + '% ' + (peakTotalDev > 0 ? 'above' : 'below') + ' the weekly average), while Impressions stayed relatively stable.';
+  if (Math.abs(peakImpDev) >= 20)
+    return 'CVR ' + dir + ' because Impressions ' + (peakImpDev > 0 ? 'spiked' : 'dropped') + ' on ' + peakImpDay + ' (' + Math.abs(Math.round(peakImpDev)) + '% ' + (peakImpDev > 0 ? 'above' : 'below') + ' the weekly average) but Downloads did not move proportionally.';
+
+  return 'No major spike or drop detected. The CVR change appears to be driven by normal daily variation.';
+}
+
+function renderInsightCards(data, territory, source, agg) {
+  var el = document.getElementById('insight-cards');
+  var sortedWeeks = Object.keys(agg.weeks).sort();
+  if (!sortedWeeks.length) { el.innerHTML = ''; return; }
+
+  var latestWk  = sortedWeeks[sortedWeeks.length - 1];
+  var prevWk    = sortedWeeks.length >= 2 ? sortedWeeks[sortedWeeks.length - 2] : null;
+  var latestCVR = calcCVR(agg.weeks[latestWk]);
+  var prevCVR   = prevWk ? calcCVR(agg.weeks[prevWk]) : null;
+
+  var cvrDisplay = latestCVR !== null ? latestCVR.toFixed(2) + '%' : '—';
+  var cvrSub     = fmtRange(latestWk);
+
+  var wowHtml;
+  if (latestCVR === null || prevCVR === null) {
+    wowHtml = '<div class="ic-value">—</div><div class="ic-sub">Not enough data</div>';
+  } else {
+    var pp     = latestCVR - prevCVR;
+    var rel    = prevCVR > 0 ? pp / prevCVR * 100 : null;
+    var cls    = pp > 0.05 ? 'pos' : pp < -0.05 ? 'neg' : '';
+    var ppStr  = (pp >= 0 ? '+' : '') + pp.toFixed(2) + 'pp';
+    var relStr = rel !== null ? ' / ' + (rel >= 0 ? '+' : '') + rel.toFixed(1) + '%' : '';
+    wowHtml = '<div class="ic-value ' + cls + '">' + ppStr + relStr + '</div>' +
+              '<div class="ic-sub">Prev week: ' + prevCVR.toFixed(2) + '%</div>';
+  }
+
+  var reason = generateCVRReason(data, territory, source, agg, latestWk, prevWk, latestCVR, prevCVR);
+  el.innerHTML =
+    '<div class="ic"><div class="ic-label">Latest Week CVR</div>' +
+      '<div class="ic-value">' + cvrDisplay + '</div>' +
+      '<div class="ic-sub">' + cvrSub + '</div></div>' +
+    '<div class="ic"><div class="ic-label">WoW CVR Change</div>' + wowHtml + '</div>' +
+    '<div class="ic"><div class="ic-label">Insight</div><div class="ic-reason">' + esc(reason) + '</div></div>';
+}
+
 function renderTable() {
   var source=document.getElementById('f-source').value;
   var territory=document.getElementById('f-country').value;
   var wrap=document.getElementById('table-wrap');
   var agg=aggregate(_mem, territory, source);
+  renderInsightCards(_mem, territory, source, agg);
   if(!Object.keys(agg.weeks).length){
     wrap.innerHTML='<div class="empty"><h3>No data for selected filters</h3></div>';
     return;
