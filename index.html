@@ -193,13 +193,14 @@ function aggregate(data, territory, source) {
   var srcs  = source==='all' ? ALL_SRCS : [source];
   terrs.forEach(function(t) {
     Object.keys(data[t]).forEach(function(date) {
-      var vals=data[t][date], wk=sundayOf(date), mo=wednesdayOf(wk), qt=qtrOf(mo), yr=date.slice(0,4);
+      var vals=data[t][date], wk=sundayOf(date), mo=date.slice(0,7), qt=qtrOf(mo), yr=date.slice(0,4);
       if(!weeks[wk])    weeks[wk]    = {ftd:0,imp:0,total:0,rdl:0,days:0,_u:{}};
       if(!months[mo])   months[mo]   = {ftd:0,imp:0,total:0,rdl:0,_mu:{}};
-      if(!quarters[qt]) quarters[qt] = {ftd:0,imp:0,total:0,rdl:0};
+      if(!quarters[qt]) quarters[qt] = {ftd:0,imp:0,total:0,rdl:0,_qu:{}};
       if(!years[yr])    years[yr]    = {ftd:0,imp:0,total:0,rdl:0};
       if(!weeks[wk]._u[date]){ weeks[wk]._u[date]=1; weeks[wk].days++; }
       if(!months[mo]._mu[date]) months[mo]._mu[date]=1;
+      if(!quarters[qt]._qu[date]) quarters[qt]._qu[date]=1;
       srcs.forEach(function(src) {
         var ftd=vals['ftd_'+src]||0, imp=vals['imp_'+src]||0, total=vals['total_'+src]||0, rdl=vals['rdl_'+src]||0;
         weeks[wk].ftd+=ftd;    weeks[wk].imp+=imp;    weeks[wk].total+=total;    weeks[wk].rdl+=rdl;
@@ -215,6 +216,13 @@ function aggregate(data, territory, source) {
     months[mo].days        = Object.keys(months[mo]._mu).length;
     months[mo].daysInMonth = new Date(Date.UTC(yr,mth,0)).getUTCDate();
     delete months[mo]._mu;
+  });
+  Object.keys(quarters).forEach(function(qt){
+    var yr=+qt.slice(0,4), q=qt.slice(5);
+    quarters[qt].days = Object.keys(quarters[qt]._qu).length;
+    var qMths = {Q1:[1,2,3],Q2:[4,5,6],Q3:[7,8,9],Q4:[10,11,12]}[q];
+    quarters[qt].daysInQtr = qMths.reduce(function(s,m){ return s+new Date(Date.UTC(yr,m,0)).getUTCDate(); },0);
+    delete quarters[qt]._qu;
   });
   return {weeks:weeks, months:months, quarters:quarters, years:years};
 }
@@ -400,10 +408,7 @@ function renderInsightCards(data, territory, source, agg) {
 
   if (granularity === 'monthly') {
     var sortedMos    = Object.keys(agg.months).sort();
-    var completeMos  = sortedMos.filter(function(mo){
-      var moWks = Object.keys(agg.weeks).filter(function(wk){ return wednesdayOf(wk) === mo; });
-      return moWks.length >= 4 && moWks.every(function(wk){ return agg.weeks[wk].days === 7; });
-    });
+    var completeMos  = sortedMos.filter(function(mo){ return agg.months[mo].days >= agg.months[mo].daysInMonth; });
     if (!completeMos.length) { el.innerHTML = ''; return; }
     var latestMo = completeMos[completeMos.length - 1];
     var prevMo   = completeMos.length >= 2 ? completeMos[completeMos.length - 2] : null;
@@ -420,10 +425,7 @@ function renderInsightCards(data, territory, source, agg) {
 
   } else if (granularity === 'quarterly') {
     var sortedQtrs   = Object.keys(agg.quarters).sort();
-    var completeQtrs = sortedQtrs.filter(function(qt) {
-      var qtWks = Object.keys(agg.weeks).filter(function(wk){ return qtrOf(wednesdayOf(wk)) === qt; });
-      return qtWks.length >= 10 && qtWks.every(function(wk){ return agg.weeks[wk].days === 7; });
-    });
+    var completeQtrs = sortedQtrs.filter(function(qt){ return agg.quarters[qt].days >= agg.quarters[qt].daysInQtr; });
     if (!completeQtrs.length) { el.innerHTML = ''; return; }
     var latestQt = completeQtrs[completeQtrs.length - 1];
     var prevQt   = completeQtrs.length >= 2 ? completeQtrs[completeQtrs.length - 2] : null;
