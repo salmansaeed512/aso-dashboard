@@ -75,7 +75,6 @@ td.grp-start{border-left:2px solid #e8edf2}
       <option value="browse">App Store Browse</option>
       <option value="appref">App Referrer</option>
       <option value="webref">Web Referrer</option>
-      <option value="unavail">Unavailable</option>
     </select>
   </div>
   <div class="fg">
@@ -124,7 +123,7 @@ var SRC = {
   'Unavailable':           'unavail',
   'Institutional Purchase':'instit'
 };
-var ALL_SRCS = ['search','browse','appref','webref','unavail','instit'];
+var ALL_SRCS = ['search','browse','appref','webref'];
 
 var METRICS = [
   { key:'imp',   label:'Impressions',           short:'Impressions' },
@@ -229,8 +228,7 @@ function aggregate(data, territory, source) {
 
 var SRC_LABELS = {
   search:'App Store Search', browse:'App Store Browse',
-  appref:'App Referrer',     webref:'Web Referrer',
-  unavail:'Unavailable',     instit:'Institutional Purchase'
+  appref:'App Referrer',     webref:'Web Referrer'
 };
 
 function rangedBucket(data, territory, source, startDate, endDate) {
