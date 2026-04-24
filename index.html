@@ -460,23 +460,59 @@ function renderMonthlyTable(agg, source, territory) {
 }
 
 function renderYearlyTable(agg, source, territory) {
-  var wrap=document.getElementById('table-wrap');
-  var sortedYears=Object.keys(agg.years).sort().reverse();
-  var sel=METRICS.filter(function(m){ return selectedMetrics.indexOf(m.key)>=0; });
-  var hdr='<th class="ta-l">Year</th>';
+  var wrap = document.getElementById('table-wrap');
+  var allWeeks = Object.keys(agg.weeks).sort();
+
+  // Determine latest year using wednesday-of-week for consistent year assignment
+  var maxYear = 0;
+  allWeeks.forEach(function(wk){
+    var yr = parseInt(wednesdayOf(wk).slice(0,4));
+    if(yr > maxYear) maxYear = yr;
+  });
+
+  // Build year → weekNum → weekKey lookup for O(1) same-week matching
+  var yearWkMap = {};
+  allWeeks.forEach(function(wk){
+    var yr = parseInt(wednesdayOf(wk).slice(0,4));
+    var wn = weekNum(wk);
+    if(!yearWkMap[yr]) yearWkMap[yr] = {};
+    yearWkMap[yr][wn] = wk;
+  });
+
+  // Current year weeks only, newest first
+  var curWeeks = allWeeks
+    .filter(function(wk){ return parseInt(wednesdayOf(wk).slice(0,4)) === maxYear; })
+    .reverse();
+
+  if(!curWeeks.length){
+    wrap.innerHTML='<div class="empty"><h3>No data for selected filters</h3></div>';
+    return;
+  }
+
+  var prevYear = maxYear - 1;
+  var sel = METRICS.filter(function(m){ return selectedMetrics.indexOf(m.key)>=0; });
+  var hdr = '<th class="ta-l">Week</th><th class="ta-l">'+maxYear+' Period</th>';
   sel.forEach(function(m,i){ var g=i>0?' grp-start':''; hdr+='<th class="'+g+'">'+m.label+'</th><th>YoY '+m.short+'</th>'; });
-  var rows='';
-  sortedYears.forEach(function(yr,yi){
-    var curr=agg.years[yr], prev=sortedYears[yi+1]?agg.years[sortedYears[yi+1]]:null;
-    var cells='<td class="ta-l"><strong>'+yr+'</strong></td>';
+
+  var rows = '';
+  curWeeks.forEach(function(wk){
+    var curr = agg.weeks[wk];
+    var wn   = weekNum(wk);
+    var prevWk = (yearWkMap[prevYear] && yearWkMap[prevYear][wn]) ? yearWkMap[prevYear][wn] : null;
+    var prev   = prevWk ? agg.weeks[prevWk] : null;
+
+    var partial = curr.days<7 ? ' <span style="font-size:10px;color:#94a3b8">(partial)</span>' : '';
+    var cells = '<td class="ta-l"><strong>'+(wn>0?'W'+String(wn).padStart(2,'0'):'Pre-W01')+'</strong>'+partial+'</td>'+
+                '<td class="ta-l" style="color:#64748b;font-size:12px">'+fmtRange(wk)+'</td>';
     sel.forEach(function(m,i){
       var g=i>0?' grp-start':'';
       cells+='<td class="'+g+'">'+metricDisplay(curr,m.key)+'</td>';
       cells+='<td>'+badge(prev?pct(metricNum(curr,m.key),metricNum(prev,m.key)):null)+'</td>';
     });
-    rows+='<tr class="yr-row">'+cells+'</tr>';
+    rows+='<tr>'+cells+'</tr>';
   });
-  wrap.innerHTML=tableMeta(source,territory,sortedYears.length,'years')+
+
+  wrap.innerHTML=tableMeta(source,territory,curWeeks.length,'weeks · '+maxYear+' vs '+prevYear)+
     '<div style="overflow-x:auto"><table><thead><tr>'+hdr+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
