@@ -97,9 +97,10 @@ td.grp-start{border-left:2px solid #e8edf2}
   <div class="fg">
     <label>Time Granularity</label>
     <div class="mtoggle">
-      <button id="gt-weekly"  class="active" onclick="setGranularity('weekly')">Weekly</button>
-      <button id="gt-monthly" onclick="setGranularity('monthly')">Monthly</button>
-      <button id="gt-yearly"  onclick="setGranularity('yearly')">Yearly</button>
+      <button id="gt-weekly"    class="active" onclick="setGranularity('weekly')">Weekly</button>
+      <button id="gt-monthly"   onclick="setGranularity('monthly')">Monthly</button>
+      <button id="gt-quarterly" onclick="setGranularity('quarterly')">Quarterly</button>
+      <button id="gt-yearly"    onclick="setGranularity('yearly')">Yearly</button>
     </div>
   </div>
 </div>
@@ -154,9 +155,10 @@ function toggleMetric(key) {
 
 function setGranularity(g) {
   granularity = g;
-  document.getElementById('gt-weekly').classList.toggle('active',  g === 'weekly');
-  document.getElementById('gt-monthly').classList.toggle('active', g === 'monthly');
-  document.getElementById('gt-yearly').classList.toggle('active',  g === 'yearly');
+  document.getElementById('gt-weekly').classList.toggle('active',    g === 'weekly');
+  document.getElementById('gt-monthly').classList.toggle('active',   g === 'monthly');
+  document.getElementById('gt-quarterly').classList.toggle('active', g === 'quarterly');
+  document.getElementById('gt-yearly').classList.toggle('active',    g === 'yearly');
   renderTable();
 }
 
@@ -177,24 +179,33 @@ function fmtRange(s) {
   return MO[a.getUTCMonth()]+' '+a.getUTCDate()+' – '+MO[b.getUTCMonth()]+' '+b.getUTCDate();
 }
 function fmtMonth(mo) { return new Date(mo+'-15').toLocaleDateString('en-US',{month:'long',year:'numeric'}); }
+function qtrOf(mo) { var m=parseInt(mo.slice(5,7)); var q=m<=3?'Q1':m<=6?'Q2':m<=9?'Q3':'Q4'; return mo.slice(0,4)+'-'+q; }
+function fmtQtr(qt) { var p=qt.split('-'); return p[1]+' '+p[0]; }
+function qtrDateRange(qt) {
+  var yr=qt.slice(0,4), q=qt.slice(5);
+  var map={Q1:{start:yr+'-01-01',end:yr+'-03-31'},Q2:{start:yr+'-04-01',end:yr+'-06-30'},Q3:{start:yr+'-07-01',end:yr+'-09-30'},Q4:{start:yr+'-10-01',end:yr+'-12-31'}};
+  return map[q];
+}
 
 function aggregate(data, territory, source) {
-  var weeks={}, months={}, years={};
+  var weeks={}, months={}, quarters={}, years={};
   var terrs = territory==='all' ? Object.keys(data) : (data[territory]?[territory]:[]);
   var srcs  = source==='all' ? ALL_SRCS : [source];
   terrs.forEach(function(t) {
     Object.keys(data[t]).forEach(function(date) {
-      var vals=data[t][date], wk=sundayOf(date), mo=wednesdayOf(wk), yr=date.slice(0,4);
-      if(!weeks[wk])  weeks[wk]  = {ftd:0,imp:0,total:0,rdl:0,days:0,_u:{}};
-      if(!months[mo]) months[mo] = {ftd:0,imp:0,total:0,rdl:0,_mu:{}};
-      if(!years[yr])  years[yr]  = {ftd:0,imp:0,total:0,rdl:0};
+      var vals=data[t][date], wk=sundayOf(date), mo=wednesdayOf(wk), qt=qtrOf(mo), yr=date.slice(0,4);
+      if(!weeks[wk])    weeks[wk]    = {ftd:0,imp:0,total:0,rdl:0,days:0,_u:{}};
+      if(!months[mo])   months[mo]   = {ftd:0,imp:0,total:0,rdl:0,_mu:{}};
+      if(!quarters[qt]) quarters[qt] = {ftd:0,imp:0,total:0,rdl:0};
+      if(!years[yr])    years[yr]    = {ftd:0,imp:0,total:0,rdl:0};
       if(!weeks[wk]._u[date]){ weeks[wk]._u[date]=1; weeks[wk].days++; }
       if(!months[mo]._mu[date]) months[mo]._mu[date]=1;
       srcs.forEach(function(src) {
         var ftd=vals['ftd_'+src]||0, imp=vals['imp_'+src]||0, total=vals['total_'+src]||0, rdl=vals['rdl_'+src]||0;
-        weeks[wk].ftd+=ftd; weeks[wk].imp+=imp; weeks[wk].total+=total; weeks[wk].rdl+=rdl;
-        months[mo].ftd+=ftd; months[mo].imp+=imp; months[mo].total+=total; months[mo].rdl+=rdl;
-        years[yr].ftd+=ftd;  years[yr].imp+=imp;  years[yr].total+=total;  years[yr].rdl+=rdl;
+        weeks[wk].ftd+=ftd;    weeks[wk].imp+=imp;    weeks[wk].total+=total;    weeks[wk].rdl+=rdl;
+        months[mo].ftd+=ftd;   months[mo].imp+=imp;   months[mo].total+=total;   months[mo].rdl+=rdl;
+        quarters[qt].ftd+=ftd; quarters[qt].imp+=imp; quarters[qt].total+=total; quarters[qt].rdl+=rdl;
+        years[yr].ftd+=ftd;    years[yr].imp+=imp;    years[yr].total+=total;    years[yr].rdl+=rdl;
       });
     });
   });
@@ -205,7 +216,7 @@ function aggregate(data, territory, source) {
     months[mo].daysInMonth = new Date(Date.UTC(yr,mth,0)).getUTCDate();
     delete months[mo]._mu;
   });
-  return {weeks:weeks, months:months, years:years};
+  return {weeks:weeks, months:months, quarters:quarters, years:years};
 }
 
 var SRC_LABELS = {
@@ -407,6 +418,26 @@ function renderInsightCards(data, territory, source, agg) {
     periodLabel  = 'MoM';
     cvrSub       = fmtMonth(latestMo);
 
+  } else if (granularity === 'quarterly') {
+    var sortedQtrs   = Object.keys(agg.quarters).sort();
+    var completeQtrs = sortedQtrs.filter(function(qt) {
+      var qtWks = Object.keys(agg.weeks).filter(function(wk){ return qtrOf(wednesdayOf(wk)) === qt; });
+      return qtWks.length >= 10 && qtWks.every(function(wk){ return agg.weeks[wk].days === 7; });
+    });
+    if (!completeQtrs.length) { el.innerHTML = ''; return; }
+    var latestQt = completeQtrs[completeQtrs.length - 1];
+    var prevQt   = completeQtrs.length >= 2 ? completeQtrs[completeQtrs.length - 2] : null;
+    latestB      = agg.quarters[latestQt];
+    prevB        = prevQt ? agg.quarters[prevQt] : null;
+    latestCVR    = calcCVR(latestB);
+    prevCVR      = prevB ? calcCVR(prevB) : null;
+    var lqr      = qtrDateRange(latestQt); latestStart=lqr.start; latestEnd=lqr.end;
+    if (prevQt) { var pqr=qtrDateRange(prevQt); prevStart=pqr.start; prevEnd=pqr.end; }
+    cardLabel    = 'Latest Quarter CVR';
+    changeLabel  = 'QoQ CVR Change';
+    periodLabel  = 'QoQ';
+    cvrSub       = fmtQtr(latestQt);
+
   } else if (granularity === 'yearly') {
     var allWks  = Object.keys(agg.weeks).sort();
     var maxYear = 0;
@@ -460,7 +491,7 @@ function renderInsightCards(data, territory, source, agg) {
     changeBg   = pp > 0.05 ? 'bg-pos' : pp < -0.05 ? 'bg-neg' : 'bg-neu';
     var ppStr  = (pp >= 0 ? '+' : '') + pp.toFixed(2) + 'pp';
     var relStr = rel !== null ? ' / ' + (rel >= 0 ? '+' : '') + rel.toFixed(1) + '%' : '';
-    var prevLbl = granularity==='monthly' ? 'month' : granularity==='yearly' ? 'year (same week)' : 'week';
+    var prevLbl = granularity==='monthly' ? 'month' : granularity==='quarterly' ? 'quarter' : granularity==='yearly' ? 'year (same week)' : 'week';
     changeHtml = '<div class="ic-value ' + valCls + '">' + ppStr + relStr + '</div>' +
                  '<div class="ic-sub">Prev ' + prevLbl + ': ' + prevCVR.toFixed(2) + '%</div>';
   }
@@ -484,9 +515,10 @@ function renderTable() {
     wrap.innerHTML='<div class="empty"><h3>No data for selected filters</h3></div>';
     return;
   }
-  if(granularity==='yearly')       renderYearlyTable(agg, source, territory);
-  else if(granularity==='monthly') renderMonthlyTable(agg, source, territory);
-  else                             renderWeeklyTable(agg, source, territory);
+  if(granularity==='yearly')          renderYearlyTable(agg, source, territory);
+  else if(granularity==='quarterly')  renderQuarterlyTable(agg, source, territory);
+  else if(granularity==='monthly')    renderMonthlyTable(agg, source, territory);
+  else                                renderWeeklyTable(agg, source, territory);
 }
 
 function renderWeeklyTable(agg, source, territory) {
@@ -530,6 +562,27 @@ function renderMonthlyTable(agg, source, territory) {
     rows+='<tr class="mo-row">'+cells+'</tr>';
   });
   wrap.innerHTML=tableMeta(source,territory,sortedMonths.length,'months')+
+    '<div style="overflow-x:auto"><table><thead><tr>'+hdr+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function renderQuarterlyTable(agg, source, territory) {
+  var wrap=document.getElementById('table-wrap');
+  var sortedQtrs=Object.keys(agg.quarters).sort().reverse();
+  var sel=METRICS.filter(function(m){ return selectedMetrics.indexOf(m.key)>=0; });
+  var hdr='<th class="ta-l">Quarter</th>';
+  sel.forEach(function(m,i){ var g=i>0?' grp-start':''; hdr+='<th class="'+g+'">'+m.label+'</th><th>QoQ '+m.short+'</th>'; });
+  var rows='';
+  sortedQtrs.forEach(function(qt,qi){
+    var curr=agg.quarters[qt], prev=sortedQtrs[qi+1]?agg.quarters[sortedQtrs[qi+1]]:null;
+    var cells='<td class="ta-l"><strong>'+fmtQtr(qt)+'</strong></td>';
+    sel.forEach(function(m,i){
+      var g=i>0?' grp-start':'';
+      cells+='<td class="'+g+'">'+metricDisplay(curr,m.key)+'</td>';
+      cells+='<td>'+badge(prev?pct(metricNum(curr,m.key),metricNum(prev,m.key)):null)+'</td>';
+    });
+    rows+='<tr class="mo-row">'+cells+'</tr>';
+  });
+  wrap.innerHTML=tableMeta(source,territory,sortedQtrs.length,'quarters')+
     '<div style="overflow-x:auto"><table><thead><tr>'+hdr+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
