@@ -296,11 +296,12 @@ function generateCVRReason(data, territory, source, agg, latestWk, prevWk, lates
 
 function renderInsightCards(data, territory, source, agg) {
   var el = document.getElementById('insight-cards');
-  var sortedWeeks = Object.keys(agg.weeks).sort();
-  if (!sortedWeeks.length) { el.innerHTML = ''; return; }
+  var sortedWeeks    = Object.keys(agg.weeks).sort();
+  var completeWeeks  = sortedWeeks.filter(function(wk){ return agg.weeks[wk].days === 7; });
+  if (!completeWeeks.length) { el.innerHTML = ''; return; }
 
-  var latestWk  = sortedWeeks[sortedWeeks.length - 1];
-  var prevWk    = sortedWeeks.length >= 2 ? sortedWeeks[sortedWeeks.length - 2] : null;
+  var latestWk  = completeWeeks[completeWeeks.length - 1];
+  var prevWk    = completeWeeks.length >= 2 ? completeWeeks[completeWeeks.length - 2] : null;
   var latestCVR = calcCVR(agg.weeks[latestWk]);
   var prevCVR   = prevWk ? calcCVR(agg.weeks[prevWk]) : null;
 
