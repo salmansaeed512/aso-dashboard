@@ -38,15 +38,20 @@ td.grp-start{border-left:2px solid #e8edf2}
 .empty h3{font-size:15px;margin-bottom:6px}
 .toast{position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);z-index:999;opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.show{opacity:1}
-.insight-cards{display:grid;grid-template-columns:170px 230px 1fr;gap:12px;margin:0 24px 16px}
-.ic{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.ic-label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
-.ic-value{font-size:22px;font-weight:700;color:#1a1a2e;line-height:1.2}
+.insight-cards{display:grid;grid-template-columns:1fr 1fr 2fr;gap:14px;margin:0 24px 16px}
+.ic{background:#fff;border-radius:12px;padding:18px 22px;box-shadow:0 2px 6px rgba(0,0,0,.07);border:1px solid #e2e8f0;transition:box-shadow .15s}
+.ic.bg-pos{background:#f0fdf4;border-color:#bbf7d0}
+.ic.bg-neg{background:#fff1f2;border-color:#fecdd3}
+.ic.bg-neu{background:#f8fafc;border-color:#e2e8f0}
+.ic-label{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+.ic-value{font-size:24px;font-weight:700;color:#1a1a2e;line-height:1.2}
 .ic-value.pos{color:#16a34a}
 .ic-value.neg{color:#dc2626}
-.ic-sub{font-size:12px;color:#64748b;margin-top:5px;line-height:1.5}
-.ic-reason{font-size:13px;color:#374151;line-height:1.6}
-@media(max-width:900px){.insight-cards{grid-template-columns:1fr}}
+.ic-value.neu{color:#94a3b8}
+.ic-sub{font-size:12px;color:#64748b;margin-top:6px;line-height:1.5}
+.ic-reason{font-size:13px;color:#374151;line-height:1.65}
+@media(max-width:860px){.insight-cards{grid-template-columns:1fr 1fr} .insight-cards .ic:last-child{grid-column:1/-1}}
+@media(max-width:520px){.insight-cards{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -378,16 +383,18 @@ function renderInsightCards(data, territory, source, agg) {
   var cvrDisplay = latestCVR !== null ? latestCVR.toFixed(2) + '%' : '—';
   var cvrSub     = fmtRange(latestWk);
 
-  var wowHtml;
+  var wowHtml, wowBg;
   if (latestCVR === null || prevCVR === null) {
-    wowHtml = '<div class="ic-value">—</div><div class="ic-sub">Not enough data</div>';
+    wowBg   = 'bg-neu';
+    wowHtml = '<div class="ic-value neu">—</div><div class="ic-sub">Not enough data</div>';
   } else {
     var pp     = latestCVR - prevCVR;
     var rel    = prevCVR > 0 ? pp / prevCVR * 100 : null;
-    var cls    = pp > 0.05 ? 'pos' : pp < -0.05 ? 'neg' : '';
+    var valCls = pp > 0.05 ? 'pos' : pp < -0.05 ? 'neg' : 'neu';
+    wowBg      = pp > 0.05 ? 'bg-pos' : pp < -0.05 ? 'bg-neg' : 'bg-neu';
     var ppStr  = (pp >= 0 ? '+' : '') + pp.toFixed(2) + 'pp';
     var relStr = rel !== null ? ' / ' + (rel >= 0 ? '+' : '') + rel.toFixed(1) + '%' : '';
-    wowHtml = '<div class="ic-value ' + cls + '">' + ppStr + relStr + '</div>' +
+    wowHtml = '<div class="ic-value ' + valCls + '">' + ppStr + relStr + '</div>' +
               '<div class="ic-sub">Prev week: ' + prevCVR.toFixed(2) + '%</div>';
   }
 
@@ -396,8 +403,8 @@ function renderInsightCards(data, territory, source, agg) {
     '<div class="ic"><div class="ic-label">Latest Week CVR</div>' +
       '<div class="ic-value">' + cvrDisplay + '</div>' +
       '<div class="ic-sub">' + cvrSub + '</div></div>' +
-    '<div class="ic"><div class="ic-label">WoW CVR Change</div>' + wowHtml + '</div>' +
-    '<div class="ic"><div class="ic-label">Insight</div><div class="ic-reason">' + esc(reason) + '</div></div>';
+    '<div class="ic ' + wowBg + '"><div class="ic-label">WoW CVR Change</div>' + wowHtml + '</div>' +
+    '<div class="ic bg-neu"><div class="ic-label">Insight</div><div class="ic-reason">' + esc(reason) + '</div></div>';
 }
 
 function renderTable() {
