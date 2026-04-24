@@ -386,7 +386,10 @@ function renderInsightCards(data, territory, source, agg) {
 
   if (granularity === 'monthly') {
     var sortedMos    = Object.keys(agg.months).sort();
-    var completeMos  = sortedMos.filter(function(mo){ return agg.months[mo].days >= agg.months[mo].daysInMonth; });
+    var completeMos  = sortedMos.filter(function(mo){
+      var moWks = Object.keys(agg.weeks).filter(function(wk){ return wednesdayOf(wk) === mo; });
+      return moWks.length >= 4 && moWks.every(function(wk){ return agg.weeks[wk].days === 7; });
+    });
     if (!completeMos.length) { el.innerHTML = ''; return; }
     var latestMo = completeMos[completeMos.length - 1];
     var prevMo   = completeMos.length >= 2 ? completeMos[completeMos.length - 2] : null;
