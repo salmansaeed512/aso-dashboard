@@ -177,10 +177,10 @@ function aggregate(data, territory, source) {
   terrs.forEach(function(t) {
     Object.keys(data[t]).forEach(function(date) {
       var vals=data[t][date], wk=sundayOf(date), mo=wednesdayOf(wk), yr=date.slice(0,4);
-      if(!weeks[wk])  weeks[wk]  = {ftd:0,imp:0,total:0,rdl:0,days:0};
+      if(!weeks[wk])  weeks[wk]  = {ftd:0,imp:0,total:0,rdl:0,days:0,_u:{}};
       if(!months[mo]) months[mo] = {ftd:0,imp:0,total:0,rdl:0};
       if(!years[yr])  years[yr]  = {ftd:0,imp:0,total:0,rdl:0};
-      weeks[wk].days++;
+      if(!weeks[wk]._u[date]){ weeks[wk]._u[date]=1; weeks[wk].days++; }
       srcs.forEach(function(src) {
         var ftd=vals['ftd_'+src]||0, imp=vals['imp_'+src]||0, total=vals['total_'+src]||0, rdl=vals['rdl_'+src]||0;
         weeks[wk].ftd+=ftd; weeks[wk].imp+=imp; weeks[wk].total+=total; weeks[wk].rdl+=rdl;
@@ -189,7 +189,71 @@ function aggregate(data, territory, source) {
       });
     });
   });
+  Object.keys(weeks).forEach(function(wk){ delete weeks[wk]._u; });
   return {weeks:weeks, months:months, years:years};
+}
+
+var SRC_LABELS = {
+  search:'App Store Search', browse:'App Store Browse',
+  appref:'App Referrer',     webref:'Web Referrer',
+  unavail:'Unavailable',     instit:'Institutional Purchase'
+};
+
+function weekBucket(data, territory, source, weekSunday) {
+  var terrs = territory==='all' ? Object.keys(data) : (data[territory]?[territory]:[]);
+  var srcs  = source==='all' ? ALL_SRCS : [source];
+  var b = {ftd:0,imp:0,total:0,rdl:0};
+  var wkEnd = utcDate(weekSunday); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
+  var endDate = utcStr(wkEnd);
+  terrs.forEach(function(t){
+    Object.keys(data[t]).forEach(function(date){
+      if(date < weekSunday || date > endDate) return;
+      srcs.forEach(function(src){
+        var v=data[t][date];
+        b.ftd  +=v['ftd_'  +src]||0; b.imp  +=v['imp_'  +src]||0;
+        b.total+=v['total_'+src]||0; b.rdl  +=v['rdl_'  +src]||0;
+      });
+    });
+  });
+  return b;
+}
+
+function generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrDiff, mode) {
+  var items = mode==='country' ? Object.keys(data) : ALL_SRCS;
+  var results=[], totalImpLatest=0;
+  items.forEach(function(item){
+    var t = mode==='country' ? item : territory;
+    var s = mode==='source'  ? item : source;
+    var bL = weekBucket(data, t, s, latestWk);
+    if(!bL.imp) return;
+    totalImpLatest += bL.imp;
+    var bP = prevWk ? weekBucket(data, t, s, prevWk) : null;
+    results.push({ name: mode==='country' ? item : (SRC_LABELS[item]||item), bL:bL, bP:bP });
+  });
+  if(!results.length) return 'No breakdown data available.';
+
+  results.forEach(function(r){
+    r.impShare  = totalImpLatest>0 ? r.bL.imp/totalImpLatest*100 : 0;
+    r.cvrLatest = calcCVR(r.bL);
+    r.cvrPrev   = r.bP ? calcCVR(r.bP) : null;
+    r.cvrDiff   = (r.cvrLatest!==null && r.cvrPrev!==null) ? r.cvrLatest-r.cvrPrev : null;
+    r.contrib   = r.cvrDiff!==null ? (r.impShare/100)*r.cvrDiff : null;
+  });
+
+  var sortable = results.filter(function(r){ return r.contrib!==null && r.impShare>=1; });
+  sortable.sort(function(a,b){ return Math.abs(b.contrib)-Math.abs(a.contrib); });
+  if(!sortable.length) return 'No major driver detected across '+(mode==='country'?'countries':'sources')+'.';
+
+  var top  = sortable[0];
+  var opp  = sortable.filter(function(r){ return r.contrib!==null && Math.sign(r.contrib)!==Math.sign(top.contrib) && r.impShare>=2; })[0];
+  var dir  = cvrDiff>=0 ? 'increased' : 'declined';
+
+  var txt = 'CVR '+dir+'. Main driver: '+top.name+
+    ' ('+top.impShare.toFixed(0)+'% imp share, CVR '+(top.cvrDiff>=0?'+':'')+top.cvrDiff.toFixed(2)+'pp WoW)';
+  if(opp)
+    txt += '. '+opp.name+' pulled in the opposite direction ('+opp.impShare.toFixed(0)+'% imp share, CVR '+(opp.cvrDiff>=0?'+':'')+opp.cvrDiff.toFixed(2)+'pp WoW)';
+  txt += '.';
+  return txt;
 }
 
 function metricNum(b, key) {
@@ -249,12 +313,18 @@ function generateCVRReason(data, territory, source, agg, latestWk, prevWk, lates
   if (prevCVR   === null) return 'Not enough previous week data to calculate WoW CVR.';
 
   var cvrDiff = latestCVR - prevCVR;
+  var dir = cvrDiff >= 0 ? 'increased' : 'declined';
+
+  // Breakdown by country when all countries selected (primary dimension)
+  if (territory === 'all') return generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrDiff, 'country');
+  // Breakdown by source when all sources selected for a specific country
+  if (source === 'all')    return generateBreakdownReason(data, territory, source, latestWk, prevWk, cvrDiff, 'source');
+
   var latestB = agg.weeks[latestWk];
   var prevB   = agg.weeks[prevWk];
   var impWoW   = pct(latestB.imp,   prevB.imp);
   var totalWoW = pct(latestB.total, prevB.total);
   var THRESH   = 10;
-  var dir = cvrDiff >= 0 ? 'increased' : 'declined';
 
   // WoW metric-level explanation (primary signal)
   if (impWoW !== null && totalWoW !== null) {
