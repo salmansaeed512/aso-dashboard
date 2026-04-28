@@ -64,6 +64,8 @@ td.grp-start{border-left:2px solid #e8edf2}
 .kw-growth.up{color:#16a34a;font-weight:700}.kw-growth.dn{color:#dc2626;font-weight:700}.kw-growth.flat{color:#94a3b8}
 th.sortable{cursor:pointer;user-select:none}.th.sortable:hover{background:#2d3748}
 th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity:.6}
+.kw-star{cursor:pointer;font-size:15px;color:#cbd5e1;line-height:1;transition:color .15s;user-select:none}
+.kw-star.starred{color:#F7A600}
 </style>
 </head>
 <body>
@@ -154,6 +156,13 @@ th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity
         <button id="kwrs-all"      class="active" onclick="setKwRankFilter('all')">All</button>
         <button id="kwrs-ranked"   onclick="setKwRankFilter('ranked')">Ranked</button>
         <button id="kwrs-unranked" onclick="setKwRankFilter('unranked')">Unranked</button>
+      </div>
+    </div>
+    <div class="fg">
+      <label>Starred</label>
+      <div class="mtoggle">
+        <button id="kwst-off" class="active" onclick="setKwStarFilter(false)">All</button>
+        <button id="kwst-on"  onclick="setKwStarFilter(true)">★ Starred</button>
       </div>
     </div>
   </div>
@@ -720,7 +729,18 @@ function refreshHeader(data) {
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ── Keyword Ranks ─────────────────────────────────────────────────────────────
-var kwBrandFilter = 'all', kwRankFilter = 'all', kwSortCol = 'rank', kwSortAsc = true;
+var kwBrandFilter = 'all', kwRankFilter = 'all', kwStarOnly = false, kwSortCol = 'rank', kwSortAsc = true;
+
+var kwStarred = (function(){ try{ return JSON.parse(localStorage.getItem('aso_kw_starred')||'{}'); }catch(e){ return {}; } })();
+function saveStarred(){ try{ localStorage.setItem('aso_kw_starred', JSON.stringify(kwStarred)); }catch(e){} }
+function isStarred(country, kw){ return !!(kwStarred[country] && kwStarred[country][kw]); }
+function toggleStar(country, kw){
+  if(!kwStarred[country]) kwStarred[country]={};
+  if(kwStarred[country][kw]) delete kwStarred[country][kw];
+  else kwStarred[country][kw]=1;
+  saveStarred();
+  renderKeywords();
+}
 
 function setKwFilter(f) {
   kwBrandFilter = f;
@@ -730,6 +750,12 @@ function setKwFilter(f) {
 function setKwRankFilter(f) {
   kwRankFilter = f;
   ['all','ranked','unranked'].forEach(function(x){ document.getElementById('kwrs-'+x).classList.toggle('active', x===f); });
+  renderKeywords();
+}
+function setKwStarFilter(on) {
+  kwStarOnly = on;
+  document.getElementById('kwst-off').classList.toggle('active', !on);
+  document.getElementById('kwst-on').classList.toggle('active',   on);
   renderKeywords();
 }
 
@@ -771,6 +797,7 @@ function renderKeywords() {
   if (kwBrandFilter === 'nonbrand') rows = rows.filter(function(r){ return !r.brand; });
   if (kwRankFilter  === 'ranked')   rows = rows.filter(function(r){ return r.rank !== null; });
   if (kwRankFilter  === 'unranked') rows = rows.filter(function(r){ return r.rank === null; });
+  if (kwStarOnly)                   rows = rows.filter(function(r){ return isStarred(country, r.kw); });
 
   // Sort
   rows.sort(function(a, b) {
@@ -789,7 +816,8 @@ function renderKeywords() {
     return '<th class="sortable" onclick="kwSort(&quot;'+col+'&quot;)">' + label + arrow(col) + '</th>';
   }
 
-  var hdr = '<th class="ta-l sortable" onclick="kwSort(&quot;kw&quot;)">Keyword'+arrow('kw')+'</th>' +
+  var hdr = '<th style="width:28px"></th>' +
+    '<th class="ta-l sortable" onclick="kwSort(&quot;kw&quot;)">Keyword'+arrow('kw')+'</th>' +
     '<th>Type</th>' +
     thSort('vol',    'Volume') +
     thSort('diff',   'Difficulty') +
@@ -810,7 +838,9 @@ function renderKeywords() {
     var typeBadge = r.brand
       ? '<span class="kw-badge kw-brand">Brand</span>'
       : '<span class="kw-badge kw-nonbrand">Non-Brand</span>';
+    var starred = isStarred(country, r.kw);
     return '<tr>' +
+      '<td style="text-align:center;padding:9px 6px"><span class="kw-star'+(starred?' starred':'')+'" data-kw="'+esc(r.kw)+'" data-country="'+esc(country)+'">'+(starred?'★':'☆')+'</span></td>' +
       '<td class="ta-l"><strong>'+esc(r.kw)+'</strong></td>' +
       '<td>'+typeBadge+'</td>' +
       '<td>'+r.vol+'</td>' +
@@ -839,6 +869,11 @@ function kwSort(col) {
   refreshHeader(_mem);
   renderTable();
   initKwCountryFilter();
+  document.getElementById('kw-wrap').addEventListener('click', function(e) {
+    var star = e.target.classList.contains('kw-star') ? e.target : null;
+    if (!star) return;
+    toggleStar(star.getAttribute('data-country'), star.getAttribute('data-kw'));
+  });
 })();
 </script>
 </body>
