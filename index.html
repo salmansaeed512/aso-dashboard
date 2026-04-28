@@ -64,6 +64,25 @@ td.grp-start{border-left:2px solid #e8edf2}
 .kw-growth.up{color:#16a34a;font-weight:700}.kw-growth.dn{color:#dc2626;font-weight:700}.kw-growth.flat{color:#94a3b8}
 th.sortable{cursor:pointer;user-select:none}.th.sortable:hover{background:#2d3748}
 th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity:.6}
+.tgt-wrap{margin:16px 24px 24px}
+.tgt-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 6px rgba(0,0,0,.07);border:1px solid #e2e8f0;margin-bottom:20px}
+.tgt-card-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.tgt-qt-lbl{font-size:15px;font-weight:700;color:#1a1a2e}
+.tgt-diff-badge{padding:3px 10px;border-radius:6px;font-size:13px;font-weight:700}
+.tgt-diff-badge.pos{background:#dcfce7;color:#16a34a}.tgt-diff-badge.neg{background:#fee2e2;color:#dc2626}
+.tgt-metrics-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:16px}
+.tgt-m-lbl{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.tgt-m-val{font-size:26px;font-weight:700;color:#1a1a2e}
+.tgt-m-val.pos{color:#16a34a}.tgt-m-val.neg{color:#dc2626}
+.tgt-input{width:100px;padding:5px 10px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:22px;font-weight:700;text-align:center;color:#1a1a2e}
+.tgt-input:focus{border-color:#F7A600;outline:none}
+.tgt-edit-hint{font-size:10px;color:#94a3b8;font-weight:400;margin-left:4px}
+.tgt-bar-track{background:#f1f5f9;border-radius:8px;height:14px;overflow:hidden;margin-bottom:16px}
+.tgt-bar{height:100%;border-radius:8px;transition:width .4s;background:#F7A600}
+.tgt-bar.over{background:#16a34a}
+.tgt-insight{font-size:13px;color:#374151;line-height:1.7;background:#f8fafc;padding:12px 16px;border-radius:8px;border-left:3px solid #F7A600}
+.tgt-partial{font-size:10px;color:#94a3b8;font-weight:400}
+@media(max-width:600px){.tgt-metrics-row{grid-template-columns:1fr 1fr}}
 .kw-star{cursor:pointer;font-size:15px;color:#cbd5e1;line-height:1;transition:color .15s;user-select:none}
 .kw-star.starred{color:#F7A600}
 </style>
@@ -83,6 +102,7 @@ th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity
 <div class="tab-nav">
   <button class="tab-btn active" id="tabn-traffic"  onclick="setTab('traffic')">Traffic Analysis</button>
   <button class="tab-btn"        id="tabn-keywords" onclick="setTab('keywords')">Keyword Ranks</button>
+  <button class="tab-btn"        id="tabn-targets"  onclick="setTab('targets')">Targets</button>
 </div>
 
 <div id="tab-traffic" class="tab-content active">
@@ -181,6 +201,21 @@ th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity
   </div>
 </div>
 
+<div id="tab-targets" class="tab-content">
+  <div class="filters-bar">
+    <div class="fg">
+      <label>Country</label>
+      <select id="tgt-country" onchange="renderTargets()">
+        <option value="all">All Countries</option>
+      </select>
+    </div>
+  </div>
+  <div class="tgt-wrap">
+    <div id="tgt-progress-wrap"></div>
+    <div id="tgt-table-wrap"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -225,11 +260,12 @@ function toggleMetric(key) {
 }
 
 function setTab(tab) {
-  ['traffic','keywords'].forEach(function(t){
+  ['traffic','keywords','targets'].forEach(function(t){
     document.getElementById('tab-'+t).classList.toggle('active', t===tab);
     document.getElementById('tabn-'+t).classList.toggle('active', t===tab);
   });
   if(tab==='keywords') renderKeywords();
+  if(tab==='targets')  renderTargets();
 }
 
 function setGranularity(g) {
@@ -891,11 +927,192 @@ function kwSort(col) {
   renderKeywords();
 }
 
+// ── Targets Tab ───────────────────────────────────────────────────────────────
+var tgtTargets = (function(){ try{ return JSON.parse(localStorage.getItem('aso_tgt')||'{}'); }catch(e){ return {}; } })();
+function saveTgtTargets(){ try{ localStorage.setItem('aso_tgt', JSON.stringify(tgtTargets)); }catch(e){} }
+function getTgt(country, qt) {
+  if (tgtTargets[country] && tgtTargets[country][qt] !== undefined) return tgtTargets[country][qt];
+  // Auto-calculate Q2 target = Q1 CVR × 1.15
+  var yr = qt.slice(0,4), q = qt.slice(5);
+  if (q === 'Q1') return null;
+  var q1range = qtrDateRange(yr+'-Q1');
+  var b = rangedBucket(_mem, country, 'all', q1range.start, q1range.end);
+  return (b && b.imp > 0) ? (b.total / b.imp * 100) * 1.15 : null;
+}
+function setTgt(country, qt, val) {
+  if (!tgtTargets[country]) tgtTargets[country] = {};
+  tgtTargets[country][qt] = val;
+  saveTgtTargets();
+}
+function updateTgt(el) {
+  var country = el.getAttribute('data-country');
+  var qt      = el.getAttribute('data-qt');
+  setTgt(country, qt, parseFloat(el.value) || 0);
+  renderTargets();
+}
+function tgtFmtPct(v) { return (v !== null && v !== undefined) ? v.toFixed(2)+'%' : '—'; }
+function tgtFmtN(v)   { return (v !== null && v !== undefined && v > 0) ? Math.round(v).toLocaleString() : '—'; }
+
+function countDays(territory, start, end) {
+  var terrs = territory==='all' ? Object.keys(_mem) : (_mem[territory] ? [territory] : []);
+  var u = {};
+  terrs.forEach(function(t){ Object.keys(_mem[t]).forEach(function(d){ if(d>=start&&d<=end) u[d]=1; }); });
+  return Object.keys(u).length;
+}
+
+function generateTargetInsight(actCVR, target, actB, q1B) {
+  if (!actB || !actB.imp) return 'No Q2 data available yet.';
+  if (target === null) return 'Target cannot be calculated — Q1 data is missing.';
+  var diff = actCVR - target;
+  var status = diff >= 0 ? 'on track' : 'behind target';
+  var diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(2) + 'pp';
+  var txt = 'Currently ' + status + ' (' + diffStr + ' vs target of ' + tgtFmtPct(target) + ').';
+  if (q1B && q1B.imp > 0 && actB.days > 0 && q1B.days > 0) {
+    var impChg = ((actB.imp/actB.days) - (q1B.imp/q1B.days)) / (q1B.imp/q1B.days) * 100;
+    var dlChg  = ((actB.total/actB.days) - (q1B.total/q1B.days)) / (q1B.total/q1B.days) * 100;
+    txt += ' vs Q1/day — Impressions: '+(impChg>=0?'+':'')+impChg.toFixed(1)+'%, Downloads: '+(dlChg>=0?'+':'')+dlChg.toFixed(1)+'%.';
+    if (diff < 0 && impChg > 10 && dlChg < impChg - 10)
+      txt += ' Impressions growing faster than downloads — explore listing optimisation.';
+    else if (diff < 0 && dlChg < -5)
+      txt += ' Downloads/day have declined vs Q1 — investigate conversion factors.';
+    else if (diff >= 0 && dlChg > impChg)
+      txt += ' Downloads growing faster than impressions — positive conversion trend.';
+  }
+  return txt;
+}
+
+function generateTargetAllInsight(actCVR, target, countryResults) {
+  if (target === null) return 'Target cannot be calculated — Q1 data is missing.';
+  if (actCVR === null) return 'No Q2 data available yet.';
+  var diff = actCVR - target;
+  var status = diff >= 0 ? 'on track' : 'behind target';
+  var diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(2) + 'pp';
+  var totalImp = countryResults.reduce(function(s,r){ return s + (r.actB ? r.actB.imp : 0); }, 0);
+  countryResults.forEach(function(r) {
+    r.impShare = totalImp > 0 ? (r.actB ? r.actB.imp : 0) / totalImp * 100 : 0;
+    r.vsTarget = (r.actCVR !== null && r.tgt !== null) ? r.actCVR - r.tgt : null;
+    r.contrib  = r.vsTarget !== null ? r.impShare / 100 * r.vsTarget : null;
+  });
+  var sortable = countryResults.filter(function(r){ return r.contrib !== null && r.impShare >= 1; });
+  sortable.sort(function(a,b){ return Math.abs(b.contrib) - Math.abs(a.contrib); });
+  var txt = 'Overall ' + status + ' (' + diffStr + ' vs target). ';
+  var drivers = sortable.filter(function(r){ return r.contrib > 0; }).slice(0,3);
+  var drags   = sortable.filter(function(r){ return r.contrib < 0; }).slice(0,3);
+  if (drivers.length) txt += 'Driving up: ' + drivers.map(function(r){ return r.country+' ('+r.impShare.toFixed(0)+'% share, '+(r.vsTarget>=0?'+':'')+r.vsTarget.toFixed(2)+'pp vs tgt)'; }).join(', ') + '. ';
+  if (drags.length)   txt += 'Dragging down: ' + drags.map(function(r){ return r.country+' ('+r.impShare.toFixed(0)+'% share, '+r.vsTarget.toFixed(2)+'pp vs tgt)'; }).join(', ') + '.';
+  return txt;
+}
+
+function initTgtCountryFilter() {
+  var sel = document.getElementById('tgt-country');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="all">All Countries</option>';
+  Object.keys(_mem).sort().forEach(function(t) {
+    if (!Object.keys(_mem[t]).length) return;
+    sel.innerHTML += '<option value="'+esc(t)+'"'+(t===cur?' selected':'')+'>'+esc(t)+'</option>';
+  });
+}
+
+function renderTargets() {
+  var country       = document.getElementById('tgt-country').value;
+  var progressWrap  = document.getElementById('tgt-progress-wrap');
+  var tableWrap     = document.getElementById('tgt-table-wrap');
+  var currentQt     = '2026-Q2';
+  var q1Qt          = '2026-Q1';
+  var q2range       = qtrDateRange(currentQt);
+  var q1range       = qtrDateRange(q1Qt);
+
+  var q1B  = rangedBucket(_mem, country, 'all', q1range.start, q1range.end);
+  var q2B  = rangedBucket(_mem, country, 'all', q2range.start, q2range.end);
+  q1B.days = countDays(country, q1range.start, q1range.end);
+  q2B.days = countDays(country, q2range.start, q2range.end);
+
+  var q2CVR  = (q2B && q2B.imp > 0) ? q2B.total / q2B.imp * 100 : null;
+  var target = getTgt(country, currentQt);
+  var diffPP = (q2CVR !== null && target !== null) ? q2CVR - target : null;
+  var pctAch = (q2CVR !== null && target !== null && target > 0) ? q2CVR / target * 100 : null;
+
+  // Country-level results for all-countries insight
+  var countryResults = [];
+  if (country === 'all') {
+    Object.keys(_mem).sort().forEach(function(c) {
+      var cq2 = rangedBucket(_mem, c, 'all', q2range.start, q2range.end);
+      var cCVR = cq2.imp > 0 ? cq2.total / cq2.imp * 100 : null;
+      countryResults.push({ country:c, actB:cq2, actCVR:cCVR, tgt:getTgt(c, currentQt) });
+    });
+  }
+
+  var insight = country === 'all'
+    ? generateTargetAllInsight(q2CVR, target, countryResults)
+    : generateTargetInsight(q2CVR, target, q2B, q1B);
+
+  var barW   = pctAch !== null ? Math.min(pctAch, 100) : 0;
+  var barCls = (pctAch !== null && pctAch >= 100) ? 'tgt-bar over' : 'tgt-bar';
+  var bdgCls = diffPP !== null ? (diffPP >= 0 ? 'pos' : 'neg') : '';
+  var bdgTxt = diffPP !== null ? (diffPP >= 0 ? '+' : '') + diffPP.toFixed(2) + 'pp' : '';
+  var cntryEsc = esc(country);
+
+  progressWrap.innerHTML =
+    '<div class="tgt-card">' +
+      '<div class="tgt-card-hdr">' +
+        '<span class="tgt-qt-lbl">Q2 2026 CVR Target <span class="tgt-partial">(Apr – Jun · partial quarter)</span></span>' +
+        (bdgTxt ? '<span class="tgt-diff-badge '+bdgCls+'">'+bdgTxt+'</span>' : '') +
+      '</div>' +
+      '<div class="tgt-metrics-row">' +
+        '<div><div class="tgt-m-lbl">Actual CVR</div>' +
+          '<div class="tgt-m-val'+(diffPP!==null ? diffPP>=0?' pos':' neg' : '')+'">'+tgtFmtPct(q2CVR)+'</div></div>' +
+        '<div><div class="tgt-m-lbl">Target CVR <span class="tgt-edit-hint">editable</span></div>' +
+          '<input class="tgt-input" type="number" step="0.01" ' +
+            'value="'+(target!==null ? target.toFixed(2) : '')+'" placeholder="—" ' +
+            'data-country="'+cntryEsc+'" data-qt="'+currentQt+'" onchange="updateTgt(this)"></div>' +
+        '<div><div class="tgt-m-lbl">Achievement</div>' +
+          '<div class="tgt-m-val">'+(pctAch!==null ? pctAch.toFixed(1)+'%' : '—')+'</div></div>' +
+      '</div>' +
+      '<div class="tgt-bar-track"><div class="'+barCls+'" style="width:'+barW+'%"></div></div>' +
+      '<div class="tgt-insight">'+esc(insight)+'</div>' +
+    '</div>';
+
+  // Historical quarterly table
+  var agg   = aggregate(_mem, country, 'all');
+  var qtrs  = Object.keys(agg.quarters).sort().reverse();
+  var tblHdr = '<th class="ta-l">Quarter</th><th>Impressions</th><th>Total Downloads</th><th>Actual CVR</th><th>Target CVR</th><th>vs Target</th>';
+  var tblRows = qtrs.map(function(qt) {
+    var qr   = qtrDateRange(qt);
+    var b    = rangedBucket(_mem, country, 'all', qr.start, qr.end);
+    var cvr  = (b.imp > 0) ? b.total / b.imp * 100 : null;
+    var tgt  = getTgt(country, qt);
+    var vs   = (cvr !== null && tgt !== null) ? cvr - tgt : null;
+    var vsCls = vs !== null ? (vs >= 0 ? ' style="color:#16a34a;font-weight:700"' : ' style="color:#dc2626;font-weight:700"') : '';
+    var vsStr = vs !== null ? (vs >= 0 ? '+' : '') + vs.toFixed(2) + 'pp' : '—';
+    var isCurrent = qt === currentQt;
+    var tgtCell = isCurrent
+      ? '<input class="tgt-input" style="width:80px;font-size:14px;padding:3px 8px" type="number" step="0.01" ' +
+          'value="'+(tgt!==null ? tgt.toFixed(2) : '')+'" placeholder="—" ' +
+          'data-country="'+cntryEsc+'" data-qt="'+esc(qt)+'" onchange="updateTgt(this)">'
+      : tgtFmtPct(tgt);
+    return '<tr class="mo-row">' +
+      '<td class="ta-l"><strong>'+fmtQtr(qt)+(isCurrent?' <span class="tgt-partial">(partial)</span>':'')+'</strong></td>' +
+      '<td>'+tgtFmtN(b.imp)+'</td>' +
+      '<td>'+tgtFmtN(b.total)+'</td>' +
+      '<td>'+tgtFmtPct(cvr)+'</td>' +
+      '<td>'+tgtCell+'</td>' +
+      '<td'+vsCls+'>'+vsStr+'</td>' +
+      '</tr>';
+  }).join('');
+
+  tableWrap.innerHTML =
+    '<div class="tgt-card">' +
+      '<div class="tgt-card-hdr"><span class="tgt-qt-lbl">Quarterly CVR History vs Target</span></div>' +
+      '<div style="overflow-x:auto"><table><thead><tr>'+tblHdr+'</tr></thead><tbody>'+tblRows+'</tbody></table></div>' +
+    '</div>';
+}
+
 (function(){
   refreshCountryFilter(_mem);
   refreshHeader(_mem);
   renderTable();
   initKwCountryFilter();
+  initTgtCountryFilter();
   document.getElementById('kw-wrap').addEventListener('click', function(e) {
     if (!e.target.classList.contains('kw-star')) return;
     toggleStar(e.target.getAttribute('data-country'), e.target.getAttribute('data-kw'));
