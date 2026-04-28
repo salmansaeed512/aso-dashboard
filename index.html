@@ -64,10 +64,6 @@ td.grp-start{border-left:2px solid #e8edf2}
 .kw-growth.up{color:#16a34a;font-weight:700}.kw-growth.dn{color:#dc2626;font-weight:700}.kw-growth.flat{color:#94a3b8}
 th.sortable{cursor:pointer;user-select:none}.th.sortable:hover{background:#2d3748}
 th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity:.6}
-.h1p-wrap{margin:40px 24px;display:flex;align-items:center;justify-content:center;min-height:200px}
-.h1p-empty{text-align:center;color:#94a3b8}
-.h1p-empty h2{font-size:20px;font-weight:700;margin-bottom:8px;color:#1a1a2e}
-.h1p-empty p{font-size:13px}
 .kw-star{cursor:pointer;font-size:15px;color:#cbd5e1;line-height:1;transition:color .15s;user-select:none}
 .kw-star.starred{color:#F7A600}
 </style>
@@ -86,8 +82,7 @@ th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity
 
 <div class="tab-nav">
   <button class="tab-btn active" id="tabn-traffic"  onclick="setTab('traffic')">Traffic Analysis</button>
-  <button class="tab-btn"        id="tabn-keywords" onclick="setTab('keywords')">Keyword Ranks</button>
-  <button class="tab-btn"        id="tabn-h1p"      onclick="setTab('h1p')">H1 Progress</button>
+  <button class="tab-btn"        id="tabn-keywords" onclick="setTab('keywords')">Keyword Rank Tracking</button>
 </div>
 
 <div id="tab-traffic" class="tab-content active">
@@ -186,14 +181,6 @@ th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity
   </div>
 </div>
 
-<div id="tab-h1p" class="tab-content">
-  <div class="h1p-wrap">
-    <div class="h1p-empty">
-      <h2>H1 Progress</h2>
-      <p>Coming soon</p>
-    </div>
-  </div>
-</div>
 
 <div class="toast" id="toast"></div>
 
@@ -239,7 +226,7 @@ function toggleMetric(key) {
 }
 
 function setTab(tab) {
-  ['traffic','keywords','h1p'].forEach(function(t){
+  ['traffic','keywords'].forEach(function(t){
     document.getElementById('tab-'+t).classList.toggle('active', t===tab);
     document.getElementById('tabn-'+t).classList.toggle('active', t===tab);
   });
