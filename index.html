@@ -786,10 +786,10 @@ function renderKeywords() {
     return '<span class="sort-arrow">'+(kwSortAsc?'↑':'↓')+'</span>';
   }
   function thSort(col, label) {
-    return '<th class="sortable" onclick="kwSort(''+col+'')">' + label + arrow(col) + '</th>';
+    return '<th class="sortable" onclick="kwSort(&quot;'+col+'&quot;)">' + label + arrow(col) + '</th>';
   }
 
-  var hdr = '<th class="ta-l sortable" onclick="kwSort('kw')">Keyword'+arrow('kw')+'</th>' +
+  var hdr = '<th class="ta-l sortable" onclick="kwSort(&quot;kw&quot;)">Keyword'+arrow('kw')+'</th>' +
     '<th>Type</th>' +
     thSort('vol',    'Volume') +
     thSort('diff',   'Difficulty') +
