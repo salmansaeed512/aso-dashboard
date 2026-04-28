@@ -59,8 +59,8 @@ td.grp-start{border-left:2px solid #e8edf2}
 .tab-content{display:none}.tab-content.active{display:block}
 .kw-rank{display:inline-flex;align-items:center;justify-content:center;min-width:36px;padding:2px 7px;border-radius:5px;font-weight:700;font-size:12px}
 .kw-r1{background:#fef3c7;color:#92400e}.kw-r2{background:#dcfce7;color:#166534}.kw-r3{background:#dbeafe;color:#1e40af}.kw-r4{background:#f1f5f9;color:#475569}.kw-unr{background:#f8fafc;color:#94a3b8}
-.kw-badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700}
-.kw-brand{background:#fef9c3;color:#854d0e}.kw-nonbrand{background:#f0f9ff;color:#0369a1}
+.kw-type-sel{border:none;border-radius:4px;font-size:11px;font-weight:700;padding:2px 6px;cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;text-align:center}
+.kw-type-sel.brand{background:#fef9c3;color:#854d0e}.kw-type-sel.generic{background:#dcfce7;color:#166534}.kw-type-sel.competitor{background:#fdf4ff;color:#7e22ce}
 .kw-growth.up{color:#16a34a;font-weight:700}.kw-growth.dn{color:#dc2626;font-weight:700}.kw-growth.flat{color:#94a3b8}
 th.sortable{cursor:pointer;user-select:none}.th.sortable:hover{background:#2d3748}
 th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity:.6}
@@ -145,9 +145,10 @@ th.sortable:hover{opacity:.85}.sort-arrow{margin-left:4px;font-size:10px;opacity
     <div class="fg">
       <label>Keyword Type</label>
       <div class="mtoggle">
-        <button id="kwf-all"      class="active" onclick="setKwFilter('all')">All</button>
-        <button id="kwf-brand"    onclick="setKwFilter('brand')">Brand</button>
-        <button id="kwf-nonbrand" onclick="setKwFilter('nonbrand')">Non-Brand</button>
+        <button id="kwf-all"        class="active" onclick="setKwFilter('all')">All</button>
+        <button id="kwf-brand"      onclick="setKwFilter('brand')">Brand</button>
+        <button id="kwf-generic"    onclick="setKwFilter('generic')">Generic</button>
+        <button id="kwf-competitor" onclick="setKwFilter('competitor')">Competitor</button>
       </div>
     </div>
     <div class="fg">
@@ -742,9 +743,14 @@ function toggleStar(country, kw){
   renderKeywords();
 }
 
+var kwTypes = (function(){ try{ return JSON.parse(localStorage.getItem('aso_kw_types')||'{}'); }catch(e){ return {}; } })();
+function saveTypes(){ try{ localStorage.setItem('aso_kw_types', JSON.stringify(kwTypes)); }catch(e){} }
+function getKwType(country, kw, brand){ return (kwTypes[country] && kwTypes[country][kw]) || (brand ? 'brand' : 'generic'); }
+function setKwType(country, kw, type){ if(!kwTypes[country]) kwTypes[country]={}; kwTypes[country][kw]=type; saveTypes(); }
+
 function setKwFilter(f) {
   kwBrandFilter = f;
-  ['all','brand','nonbrand'].forEach(function(x){ document.getElementById('kwf-'+x).classList.toggle('active', x===f); });
+  ['all','brand','generic','competitor'].forEach(function(x){ document.getElementById('kwf-'+x).classList.toggle('active', x===f); });
   renderKeywords();
 }
 function setKwRankFilter(f) {
@@ -793,8 +799,7 @@ function renderKeywords() {
 
   // Filter
   var rows = Object.keys(kws).map(function(kw){ return Object.assign({kw:kw}, kws[kw]); });
-  if (kwBrandFilter === 'brand')    rows = rows.filter(function(r){ return r.brand; });
-  if (kwBrandFilter === 'nonbrand') rows = rows.filter(function(r){ return !r.brand; });
+  if (kwBrandFilter !== 'all') rows = rows.filter(function(r){ return getKwType(country, r.kw, r.brand) === kwBrandFilter; });
   if (kwRankFilter  === 'ranked')   rows = rows.filter(function(r){ return r.rank !== null; });
   if (kwRankFilter  === 'unranked') rows = rows.filter(function(r){ return r.rank === null; });
   if (kwStarOnly)                   rows = rows.filter(function(r){ return isStarred(country, r.kw); });
@@ -835,14 +840,17 @@ function renderKeywords() {
       : r.growth>0 ? '<span class="kw-growth up">↑'+r.growth+'</span>'
       : r.growth<0 ? '<span class="kw-growth dn">↓'+Math.abs(r.growth)+'</span>'
       : '<span class="kw-growth flat">—</span>';
-    var typeBadge = r.brand
-      ? '<span class="kw-badge kw-brand">Brand</span>'
-      : '<span class="kw-badge kw-nonbrand">Non-Brand</span>';
+    var kwType = getKwType(country, r.kw, r.brand);
+    var typeSel = '<select class="kw-type-sel '+kwType+'" data-kw="'+esc(r.kw)+'" data-country="'+esc(country)+'">' +
+      '<option value="brand"'+(kwType==='brand'?' selected':'')+'>Brand</option>' +
+      '<option value="generic"'+(kwType==='generic'?' selected':'')+'>Generic</option>' +
+      '<option value="competitor"'+(kwType==='competitor'?' selected':'')+'>Competitor</option>' +
+      '</select>';
     var starred = isStarred(country, r.kw);
     return '<tr>' +
       '<td style="text-align:center;padding:9px 6px"><span class="kw-star'+(starred?' starred':'')+'" data-kw="'+esc(r.kw)+'" data-country="'+esc(country)+'">'+(starred?'★':'☆')+'</span></td>' +
       '<td class="ta-l"><strong>'+esc(r.kw)+'</strong></td>' +
-      '<td>'+typeBadge+'</td>' +
+      '<td>'+typeSel+'</td>' +
       '<td>'+r.vol+'</td>' +
       '<td>'+r.diff+'</td>' +
       '<td>'+r.chance+'</td>' +
@@ -870,9 +878,17 @@ function kwSort(col) {
   renderTable();
   initKwCountryFilter();
   document.getElementById('kw-wrap').addEventListener('click', function(e) {
-    var star = e.target.classList.contains('kw-star') ? e.target : null;
-    if (!star) return;
-    toggleStar(star.getAttribute('data-country'), star.getAttribute('data-kw'));
+    if (!e.target.classList.contains('kw-star')) return;
+    toggleStar(e.target.getAttribute('data-country'), e.target.getAttribute('data-kw'));
+  });
+  document.getElementById('kw-wrap').addEventListener('change', function(e) {
+    if (!e.target.classList.contains('kw-type-sel')) return;
+    var country = e.target.getAttribute('data-country');
+    var kw      = e.target.getAttribute('data-kw');
+    var type    = e.target.value;
+    setKwType(country, kw, type);
+    e.target.className = 'kw-type-sel ' + type;
+    if (kwBrandFilter !== 'all') renderKeywords();
   });
 })();
 </script>
